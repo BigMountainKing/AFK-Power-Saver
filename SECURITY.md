@@ -1,3 +1,7 @@
+# Current security boundary
+
+See [current architecture](docs/current-architecture.md) for the 1.25.0 recovery-only GPU operation, CPU companion ownership, typed outcomes, and independent resource recovery. The milestone notes below describe the historical progression.
+
 # Security and hardware safety
 
 EcoPause treats restoration as more important than activation.

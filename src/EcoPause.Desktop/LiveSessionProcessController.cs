@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using EcoPause.Desktop.Safety;
+using EcoPause.Hardware.Abstractions;
 
 namespace EcoPause.Desktop;
 
@@ -16,7 +17,8 @@ internal sealed record LiveSessionToggleResult(
     bool Succeeded,
     string Message,
     string Transcript,
-    string Error);
+    string Error,
+    GpuOperationResult? Result);
 
 internal sealed class LiveSessionProcessController : IAsyncDisposable
 {
@@ -89,6 +91,13 @@ internal sealed class LiveSessionProcessController : IAsyncDisposable
             throw new InvalidOperationException("The live target is not a canonical percentage request.");
         }
 
+        return await ExecuteCommandAsync($"TOGGLE {target.ProfileId}");
+    }
+
+    public Task<LiveSessionToggleResult> RestoreAsync() => ExecuteCommandAsync("RESTORE");
+
+    private async Task<LiveSessionToggleResult> ExecuteCommandAsync(string command)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!IsReady)
         {
@@ -98,14 +107,21 @@ internal sealed class LiveSessionProcessController : IAsyncDisposable
         await _commandLock.WaitAsync();
         try
         {
-            await _process.StandardInput.WriteLineAsync($"TOGGLE {target.ProfileId}");
+            await _process.StandardInput.WriteLineAsync(command);
             await _process.StandardInput.FlushAsync();
             var message = await ReadMessageAsync("result", CommandTimeout);
             return new LiveSessionToggleResult(
                 message.Succeeded,
                 message.Message,
                 message.Transcript,
-                message.Error);
+                message.Error,
+                message.Result);
+        }
+        catch
+        {
+            IsReady = false;
+            _process.StandardInput.Close();
+            throw;
         }
         finally
         {
@@ -132,7 +148,8 @@ internal sealed class LiveSessionProcessController : IAsyncDisposable
                     await _process.StandardInput.WriteLineAsync("SHUTDOWN");
                     await _process.StandardInput.FlushAsync();
                     var shutdown = await ReadMessageAsync("shutdown", CommandTimeout);
-                    if (!shutdown.Succeeded)
+                    if (!shutdown.Succeeded || shutdown.Result is not { IsValid: true } ||
+                        shutdown.Result.State is not (GpuOperationState.Restored or GpuOperationState.Unchanged))
                     {
                         throw new InvalidOperationException(
                             string.IsNullOrWhiteSpace(shutdown.Error)
@@ -140,12 +157,11 @@ internal sealed class LiveSessionProcessController : IAsyncDisposable
                                 : shutdown.Error);
                     }
                 }
-                catch (Exception exception) when (exception is IOException or OperationCanceledException)
+                finally
                 {
-                    // Closing stdin makes the verified launcher disconnect; the broker then prioritizes restoration.
+                    // Disconnect even when the response is invalid or restoration fails.
+                    _process.StandardInput.Close();
                 }
-
-                _process.StandardInput.Close();
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 try
                 {
@@ -156,6 +172,8 @@ internal sealed class LiveSessionProcessController : IAsyncDisposable
                     _process.Kill(entireProcessTree: false);
                 }
             }
+            else
+                throw new InvalidOperationException("The GPU session exited before acknowledging recovery. Restart to verify the protected journal.");
         }
         finally
         {
@@ -246,5 +264,6 @@ internal sealed class LiveSessionProcessController : IAsyncDisposable
         bool Succeeded,
         string Message,
         string Transcript,
-        string Error);
+        string Error,
+        GpuOperationResult? Result = null);
 }

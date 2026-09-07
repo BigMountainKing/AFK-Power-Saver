@@ -371,14 +371,26 @@ namespace
                     power,
                     L"IADLXManualPowerTuning1",
                     reinterpret_cast<void**>(&power1));
+                bool defaultVerified = false;
                 if (IsSuccess(queryDefaultResult) && power1 != nullptr)
                 {
                     AdlxInt defaultValue = 0;
-                    if (IsSuccess(power1->vtable->GetPowerLimitDefault(power1, &defaultValue)))
+                    if (IsSuccess(power1->vtable->GetPowerLimitDefault(power1, &defaultValue)) &&
+                        defaultValue >= range.minValue && defaultValue <= range.maxValue &&
+                        (static_cast<int64_t>(defaultValue) - range.minValue) % range.step == 0)
                     {
                         selected.defaultValue = defaultValue;
+                        defaultVerified = true;
                     }
                     power1->vtable->Release(power1);
+                }
+                if (!defaultVerified)
+                {
+                    ReleaseSelected(selected);
+                    services->vtable->Release(services);
+                    gpus->vtable->Release(gpus);
+                    SetError(error, errorCapacity, "AMD control requires a verified driver default; GetPowerLimitDefault is unavailable or invalid.");
+                    return BridgeInvalidRange;
                 }
             }
             else

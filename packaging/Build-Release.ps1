@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$releaseVersion = '1.24.0'
+$releaseVersion = '1.25.0'
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $dotnetHome = Join-Path $repositoryRoot '.dotnet-home'
 $env:DOTNET_CLI_HOME = $dotnetHome
@@ -129,12 +129,13 @@ if (Test-Path -LiteralPath $workRoot) {
 }
 New-Item -ItemType Directory -Path $dotnetHome, $env:NUGET_PACKAGES, $publishRoot, $payloadRoot, $artifactRoot -Force | Out-Null
 
-& (Join-Path $PSScriptRoot 'Build-AmdAdlxBridge.ps1')
+& (Join-Path $PSScriptRoot 'Test-Safety.ps1')
 if ($LASTEXITCODE -ne 0) {
     throw "Building the AMD ADLX bridge failed with exit code $LASTEXITCODE."
 }
 
 $projects = [ordered]@{
+    CpuRecovery = 'src\AFKPowerSaver.CpuRecovery\AFKPowerSaver.CpuRecovery.csproj'
     Desktop = 'src\EcoPause.Desktop\EcoPause.Desktop.csproj'
     Probe = 'src\EcoPause.Probe\EcoPause.Probe.csproj'
     LiveSession = 'src\EcoPause.LiveRecoveryDrill\EcoPause.LiveRecoveryDrill.csproj'
@@ -162,6 +163,7 @@ foreach ($entry in $projects.GetEnumerator()) {
 
 $requiredExecutables = @(
     'AFKPowerSaver.exe',
+    'AFKPowerSaver.CpuRecovery.exe',
     'AFKPowerSaver.Probe.exe',
     'AFKPowerSaver.LiveSession.exe',
     'AFKPowerSaver.ElevatedHost.exe'
@@ -275,6 +277,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $installTestRoot 'Uninstall AFK Powe
 }
 
 $installedApplication = Join-Path $installTestRoot 'AFKPowerSaver.exe'
+$companionTest = Start-Process -FilePath (Join-Path $installTestRoot 'AFKPowerSaver.CpuRecovery.exe') `
+    -ArgumentList '--self-test' -WindowStyle Hidden -PassThru -Wait
+if ($companionTest.ExitCode -ne 0) { throw 'The packaged CPU companion self-test failed.' }
 $smokeModes = @('ACTIVITY', 'HOTKEY', 'UI', 'CLOSE', 'TRAY')
 foreach ($smokeMode in $smokeModes) {
     $variableName = "AFKPOWERSAVER_${smokeMode}_SMOKE_TEST"
@@ -284,6 +289,7 @@ foreach ($smokeMode in $smokeModes) {
         $smokeProcess = Start-Process `
             -FilePath $installedApplication `
             -WorkingDirectory $installTestRoot `
+            -WindowStyle Hidden `
             -PassThru `
             -Wait
         if ($smokeProcess.ExitCode -ne 0) {

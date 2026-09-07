@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch] $RunTests)
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -32,3 +32,15 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
 }
 
 Write-Output "AMD ADLX bridge: $outputPath"
+
+if ($RunTests) {
+    $testSource = Join-Path $repositoryRoot 'tests\native\AdlxBridgeTests.cpp'
+    $testObject = Join-Path $outputDirectory 'AdlxBridgeTests.obj'
+    $testExecutable = Join-Path $outputDirectory 'AdlxBridgeTests.exe'
+    $testImportLibrary = Join-Path $outputDirectory 'AdlxBridgeTests.lib'
+    $testCompile = 'call "{0}" -arch=x64 -host_arch=x64 >nul && cl.exe /nologo /std:c++20 /O2 /EHsc /MT /Fo:"{2}" "{1}" /link /IMPLIB:"{4}" /OUT:"{3}"' -f $developerCommand, $testSource, $testObject, $testExecutable, $testImportLibrary
+    & $env:ComSpec /d /s /c $testCompile
+    if ($LASTEXITCODE -ne 0) { throw 'AMD contract test compilation failed.' }
+    & $testExecutable
+    if ($LASTEXITCODE -ne 0) { throw 'AMD default-query contract tests failed.' }
+}

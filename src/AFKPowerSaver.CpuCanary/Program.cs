@@ -72,6 +72,7 @@ internal static class Program
         ProcessorMaximumStateSnapshot? original = null;
         try
         {
+            using var transaction = ProcessorTransactionLock.Acquire();
             if (File.Exists(journalPath))
             {
                 Console.WriteLine("Pending CPU recovery journal detected: RECOVERY FIRST");
@@ -176,7 +177,7 @@ internal sealed record CpuRecoveryRecord(
 
     public ProcessorMaximumStateSnapshot ToSnapshot()
     {
-        if (Version != 1)
+        if (Version is not (1 or 2))
         {
             throw new InvalidOperationException("The CPU recovery journal version is unsupported.");
         }
@@ -188,41 +189,12 @@ internal sealed record CpuRecoveryRecord(
 
 internal static class CpuRecoveryJournal
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true
-    };
-
-    public static string GetPath()
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(local, "AFK Power Saver", "cpu-canary-recovery.json");
-    }
-
-    public static void Save(string path, CpuRecoveryRecord record)
-    {
-        var directory = Path.GetDirectoryName(path)
-            ?? throw new InvalidOperationException("The CPU recovery directory is unavailable.");
-        Directory.CreateDirectory(directory);
-        var temporary = path + ".new";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(record, Options));
-        File.Move(temporary, path, overwrite: true);
-    }
-
+    public static string GetPath() => ProcessorLimitRecoveryJournal.GetPath();
+    public static void Save(string path, CpuRecoveryRecord record) => ProcessorLimitRecoveryJournal.Save(record.ToSnapshot());
     public static CpuRecoveryRecord Load(string path)
     {
-        var file = new FileInfo(path);
-        if (!file.Exists || file.Length is <= 0 or > 4096)
-        {
-            throw new InvalidOperationException("The CPU recovery journal has an invalid size.");
-        }
-        return JsonSerializer.Deserialize<CpuRecoveryRecord>(File.ReadAllText(path), Options)
-            ?? throw new InvalidOperationException("The CPU recovery journal is empty.");
+        var record = ProcessorLimitRecoveryJournal.LoadRecord();
+        return new(record.Version, record.SchemeId, record.AcMaximumPercent, record.DcMaximumPercent);
     }
-
-    public static void Delete(string path)
-    {
-        File.Delete(path);
-        File.Delete(path + ".new");
-    }
+    public static void Delete(string path) => ProcessorLimitRecoveryJournal.Delete();
 }

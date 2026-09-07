@@ -11,15 +11,15 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("AFK Power Saver Setup")]
 [assembly: AssemblyProduct("AFK Power Saver")]
 [assembly: AssemblyCompany("AFK Power Saver")]
-[assembly: AssemblyVersion("1.24.0.0")]
-[assembly: AssemblyFileVersion("1.24.0.0")]
+[assembly: AssemblyVersion("1.25.0.0")]
+[assembly: AssemblyFileVersion("1.25.0.0")]
 
 namespace AFKPowerSaver.Setup
 {
     internal static class Program
     {
         private const string ProductName = "AFK Power Saver";
-        private const string ProductVersion = "1.24.0";
+        private const string ProductVersion = "1.25.0";
         private const string PayloadResourceName = "AFKPowerSaver.Payload.zip";
         private const string UninstallerFileName = "Uninstall AFK Power Saver.exe";
         private const string UninstallRegistryParent = @"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -33,6 +33,7 @@ namespace AFKPowerSaver.Setup
         private static readonly string[] RequiredExecutables =
         {
             "AFKPowerSaver.exe",
+            "AFKPowerSaver.CpuRecovery.exe",
             "AFKPowerSaver.Probe.exe",
             "AFKPowerSaver.LiveSession.exe",
             "AFKPowerSaver.ElevatedHost.exe"

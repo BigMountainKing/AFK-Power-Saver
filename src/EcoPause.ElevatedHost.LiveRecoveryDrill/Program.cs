@@ -67,6 +67,11 @@ internal static class Program
                 try
                 {
                     hardwareLock = LiveHardwareProcessLock.Acquire();
+                    if (launch.Behavior == HelperBehavior.RecoveryOnly)
+                    {
+                        using (hardwareLock)
+                            return await RunRecoveryOnlyAsync(pipe);
+                    }
                     context = await CreateContextAsync(launch.Behavior, launch.RequestedProfileId);
                 }
 #pragma warning disable CA1031 // Initialization failures are sanitized over the verified pipe.
@@ -92,6 +97,29 @@ internal static class Program
         {
             return GeneralFailureExitCode;
         }
+    }
+
+    private static async Task<int> RunRecoveryOnlyAsync(Stream pipe)
+    {
+        RecoveryOnlyResponse response;
+        try
+        {
+            using var controller = OpenSinglePortableController();
+            var directory = GetStateDirectory(controller.State.StateDirectoryName);
+            EnsureProtectedDirectory(directory);
+            EnsureOnlyKnownArtifacts(directory);
+            var result = await GpuRecoveryOnly.RunAsync(
+                Path.Combine(directory, LiveCanaryPolicy.JournalFileName), controller, new FileRecoveryJournalStore());
+            if (!TryCleanRecoveryArtifacts(directory))
+                throw new InvalidOperationException("GPU recovery artifact cleanup did not complete.");
+            response = new(true, string.Empty, result);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            response = new(false, exception.Message, null);
+        }
+        await BoundedJsonPipe.WriteAsync(pipe, response);
+        return response.Succeeded ? 0 : 1;
     }
 
     private static async Task<int> RunFixedPhaseAsync(Stream pipe, DrillContext context)
@@ -365,17 +393,8 @@ internal static class Program
         FileSystemAclExtensions.Create(directory, CreateAdministratorOnlySecurity());
     }
 
-    private static void EnsureOnlyKnownArtifacts(string stateDirectory)
-    {
-        var entries = Directory.EnumerateFileSystemEntries(stateDirectory).ToArray();
-        if (entries.Any(entry => !string.Equals(
-                Path.GetFileName(entry),
-                LiveCanaryPolicy.JournalFileName,
-                StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new InvalidOperationException("The protected live-canary directory contains an unknown artifact.");
-        }
-    }
+    private static void EnsureOnlyKnownArtifacts(string stateDirectory) =>
+        RecoveryArtifacts.CleanInterruptedWrites(stateDirectory, LiveCanaryPolicy.JournalFileName);
 
     private static void RejectReparsePoint(string path)
     {
@@ -444,6 +463,7 @@ internal static class Program
         {
             "recovery-drill" => HelperBehavior.RecoveryDrill,
             "persistent-toggle" => HelperBehavior.PersistentToggle,
+            "recovery-only" => HelperBehavior.RecoveryOnly,
             _ => throw new ArgumentException("The elevated helper received an unknown behavior.", nameof(args))
         };
         var requestedProfileId = args[7];
@@ -452,7 +472,7 @@ internal static class Program
         {
             throw new ArgumentException("The recovery drill accepts only its fixed 400 W profile.", nameof(args));
         }
-        if (behavior == HelperBehavior.PersistentToggle)
+        if (behavior is HelperBehavior.PersistentToggle or HelperBehavior.RecoveryOnly)
         {
             _ = PortableLivePowerPolicy.ParseRequest(requestedProfileId);
         }
@@ -477,7 +497,8 @@ internal static class Program
     private enum HelperBehavior
     {
         RecoveryDrill,
-        PersistentToggle
+        PersistentToggle,
+        RecoveryOnly
     }
 
     private sealed class DrillContext(

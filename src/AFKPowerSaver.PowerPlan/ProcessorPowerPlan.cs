@@ -73,6 +73,13 @@ public static class WindowsProcessorPowerPlanWriter
         uint acMaximumPercent,
         uint dcMaximumPercent)
     {
+        WriteValues(schemeId, acMaximumPercent, dcMaximumPercent);
+        Activate(schemeId);
+        return WindowsProcessorPowerPlanReader.Read(schemeId);
+    }
+
+    private static void WriteValues(Guid schemeId, uint acMaximumPercent, uint dcMaximumPercent)
+    {
         ProcessorMaximumStateSnapshot.ValidatePercentage(acMaximumPercent, nameof(acMaximumPercent));
         ProcessorMaximumStateSnapshot.ValidatePercentage(dcMaximumPercent, nameof(dcMaximumPercent));
         if (schemeId == Guid.Empty)
@@ -98,26 +105,21 @@ public static class WindowsProcessorPowerPlanWriter
                 ref setting,
                 dcMaximumPercent),
             "PowerWriteDCValueIndex");
-        NativePowerPlan.ThrowIfFailed(
-            NativePowerPlan.PowerSetActiveScheme(IntPtr.Zero, ref schemeId),
-            "PowerSetActiveScheme");
-
-        return WindowsProcessorPowerPlanReader.Read(schemeId);
     }
 
+    private static void Activate(Guid schemeId) => NativePowerPlan.ThrowIfFailed(
+        NativePowerPlan.PowerSetActiveScheme(IntPtr.Zero, ref schemeId), "PowerSetActiveScheme");
+
     public static ProcessorMaximumStateSnapshot RestoreAndVerify(ProcessorMaximumStateSnapshot snapshot)
+        => ProcessorRestoration.RestoreAndVerify(snapshot, new RestorationAccess());
+
+    private sealed class RestorationAccess : IProcessorRestorationAccess
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        snapshot.Validate();
-        var restored = WriteAndActivate(
-            snapshot.SchemeId,
-            snapshot.AcMaximumPercent,
-            snapshot.DcMaximumPercent);
-        if (restored != snapshot)
-        {
-            throw new InvalidOperationException("The exact original processor-state values were not restored.");
-        }
-        return restored;
+        public Guid GetActiveScheme() => NativePowerPlan.GetActiveScheme();
+        public void WriteValues(ProcessorMaximumStateSnapshot snapshot) =>
+            WindowsProcessorPowerPlanWriter.WriteValues(snapshot.SchemeId, snapshot.AcMaximumPercent, snapshot.DcMaximumPercent);
+        public void Activate(Guid schemeId) => WindowsProcessorPowerPlanWriter.Activate(schemeId);
+        public ProcessorMaximumStateSnapshot Read(Guid schemeId) => WindowsProcessorPowerPlanReader.Read(schemeId);
     }
 }
 

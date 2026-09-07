@@ -9,6 +9,7 @@
     <ProjectReference Include="..\AFKPowerSaver.OverlayModel\AFKPowerSaver.OverlayModel.csproj" />
     <ProjectReference Include="..\AFKPowerSaver.Overlay.Windows\AFKPowerSaver.Overlay.Windows.csproj" />
     <ProjectReference Include="..\AFKPowerSaver.PowerPlan\AFKPowerSaver.PowerPlan.csproj" />
+    <ProjectReference Include="..\AFKPowerSaver.CpuRecovery\AFKPowerSaver.CpuRecovery.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\EcoPause.Desktop.Safety\EcoPause.Desktop.Safety.csproj" />
     <ProjectReference Include="..\EcoPause.Probe\EcoPause.Probe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\EcoPause.LiveRecoveryDrill\EcoPause.LiveRecoveryDrill.csproj" ReferenceOutputAssembly="false" />

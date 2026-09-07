@@ -6,9 +6,9 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
-    <Version>1.24.0</Version>
-    <AssemblyVersion>1.24.0.0</AssemblyVersion>
-    <FileVersion>1.24.0.0</FileVersion>
+    <Version>1.25.0</Version>
+    <AssemblyVersion>1.25.0.0</AssemblyVersion>
+    <FileVersion>1.25.0.0</FileVersion>
     <Product>AFK Power Saver</Product>
     <Company>AFK Power Saver</Company>
     <Description>Reduce selected PC power limits while away and restore the original settings exactly.</Description>

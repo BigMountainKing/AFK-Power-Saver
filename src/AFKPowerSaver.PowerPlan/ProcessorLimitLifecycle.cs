@@ -40,20 +40,21 @@ public sealed record ProcessorLimitRecoveryRecord(
     int Version,
     Guid SchemeId,
     uint AcMaximumPercent,
-    uint DcMaximumPercent)
+    uint DcMaximumPercent,
+    Guid OwnerId = default)
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
-    public static ProcessorLimitRecoveryRecord FromSnapshot(ProcessorMaximumStateSnapshot snapshot)
+    public static ProcessorLimitRecoveryRecord FromSnapshot(ProcessorMaximumStateSnapshot snapshot, Guid ownerId = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         snapshot.Validate();
-        return new(CurrentVersion, snapshot.SchemeId, snapshot.AcMaximumPercent, snapshot.DcMaximumPercent);
+        return new(CurrentVersion, snapshot.SchemeId, snapshot.AcMaximumPercent, snapshot.DcMaximumPercent, ownerId);
     }
 
     public ProcessorMaximumStateSnapshot ToSnapshot()
     {
-        if (Version != CurrentVersion)
+        if (Version is not (1 or CurrentVersion))
         {
             throw new InvalidOperationException("The CPU recovery journal version is unsupported.");
         }
@@ -71,6 +72,7 @@ public sealed record ProcessorLimitApplyResult(
 
 public static class ProcessorLimitRecoveryJournal
 {
+    public static Guid SessionOwnerId { get; } = Guid.NewGuid();
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
@@ -87,22 +89,35 @@ public static class ProcessorLimitRecoveryJournal
 
     public static bool Exists() => File.Exists(GetPath());
 
-    public static void Save(ProcessorMaximumStateSnapshot original)
+    public static void Save(ProcessorMaximumStateSnapshot original) => Save(original, SessionOwnerId);
+
+    public static void Save(ProcessorMaximumStateSnapshot original, Guid ownerId)
+        => SaveRecord(GetPath(), ProcessorLimitRecoveryRecord.FromSnapshot(original, ownerId));
+
+    public static void SaveRecord(string path, ProcessorLimitRecoveryRecord record)
     {
-        var path = GetPath();
+        ArgumentNullException.ThrowIfNull(record);
+        _ = record.ToSnapshot();
+        path = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException("The CPU recovery directory is unavailable.");
         Directory.CreateDirectory(directory);
         var temporary = path + ".new";
-        File.WriteAllText(
-            temporary,
-            JsonSerializer.Serialize(ProcessorLimitRecoveryRecord.FromSnapshot(original), Options));
+        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None,
+            4096, FileOptions.WriteThrough))
+        {
+            JsonSerializer.Serialize(stream, record, Options);
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temporary, path, overwrite: true);
     }
 
-    public static ProcessorMaximumStateSnapshot Load()
+    public static ProcessorMaximumStateSnapshot Load() => LoadRecord().ToSnapshot();
+
+    public static ProcessorLimitRecoveryRecord LoadRecord() => LoadRecord(GetPath());
+
+    public static ProcessorLimitRecoveryRecord LoadRecord(string path)
     {
-        var path = GetPath();
         var file = new FileInfo(path);
         if (!file.Exists || file.Length is <= 0 or > 4096)
         {
@@ -111,7 +126,8 @@ public static class ProcessorLimitRecoveryJournal
 
         var record = JsonSerializer.Deserialize<ProcessorLimitRecoveryRecord>(File.ReadAllText(path), Options)
             ?? throw new InvalidOperationException("The CPU recovery journal is empty.");
-        return record.ToSnapshot();
+        _ = record.ToSnapshot();
+        return record;
     }
 
     public static void Delete()
@@ -125,8 +141,11 @@ public static class ProcessorLimitRecoveryJournal
 [SupportedOSPlatform("windows")]
 public static class WindowsProcessorLimitLifecycle
 {
+    public static Guid OwnerId => ProcessorLimitRecoveryJournal.SessionOwnerId;
+
     public static ProcessorLimitApplyResult ApplyAndVerify(int requestedPercent)
     {
+        using var transaction = ProcessorTransactionLock.Acquire();
         _ = ProcessorLimitPolicy.ValidateTarget(requestedPercent);
         if (ProcessorLimitRecoveryJournal.Exists())
         {
@@ -162,14 +181,20 @@ public static class WindowsProcessorLimitLifecycle
         }
     }
 
-    public static ProcessorMaximumStateSnapshot? RestorePendingAndVerify()
+    public static ProcessorMaximumStateSnapshot? RestorePendingAndVerify() => RestoreOwnedOrPending(null);
+
+    public static ProcessorMaximumStateSnapshot? RestoreOwnedOrPending(Guid? expectedOwner)
     {
+        using var transaction = ProcessorTransactionLock.Acquire();
         if (!ProcessorLimitRecoveryJournal.Exists())
         {
             return null;
         }
 
-        var original = ProcessorLimitRecoveryJournal.Load();
+        var record = ProcessorLimitRecoveryJournal.LoadRecord();
+        if (expectedOwner is Guid owner && record.OwnerId != owner)
+            return null; // A later desktop session owns this journal.
+        var original = record.ToSnapshot();
         var restored = WindowsProcessorPowerPlanWriter.RestoreAndVerify(original);
         ProcessorLimitRecoveryJournal.Delete();
         return restored;

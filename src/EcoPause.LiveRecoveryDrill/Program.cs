@@ -211,10 +211,17 @@ internal static class Program
                     var shutdown = await BoundedJsonPipe.ReadAsync<LiveSessionBrokerResponse>(
                         server,
                         TimeSpan.FromMinutes(2));
-                    WriteDesktopMessage(new("shutdown", shutdown.Succeeded, shutdown.Message, shutdown.Transcript, shutdown.Error));
+                    WriteDesktopMessage(new("shutdown", shutdown.Succeeded, shutdown.Message, shutdown.Transcript, shutdown.Error, shutdown.Result));
                     break;
                 }
 
+                if (commandLine == "RESTORE")
+                {
+                    await BoundedJsonPipe.WriteAsync(server, new LiveSessionBrokerRequest("restore", null));
+                    var restored = await BoundedJsonPipe.ReadAsync<LiveSessionBrokerResponse>(server, TimeSpan.FromMinutes(2));
+                    WriteDesktopMessage(new("result", restored.Succeeded, restored.Message, restored.Transcript, restored.Error, restored.Result));
+                    continue;
+                }
                 const string togglePrefix = "TOGGLE ";
                 if (!commandLine.StartsWith(togglePrefix, StringComparison.Ordinal))
                 {
@@ -242,7 +249,7 @@ internal static class Program
                     response.Succeeded,
                     response.Message,
                     response.Transcript,
-                    response.Error));
+                    response.Error, response.Result));
             }
 
             return 0;
@@ -334,6 +341,11 @@ internal static class Program
                     return restored.Succeeded ? 0 : 1;
                 }
 
+                if (request.Operation == "restore")
+                {
+                    await BoundedJsonPipe.WriteAsync(pipe, await RestorePendingForBrokerAsync());
+                    continue;
+                }
                 if (!string.Equals(request.Operation, "toggle", StringComparison.Ordinal))
                 {
                     await BoundedJsonPipe.WriteAsync(
@@ -358,7 +370,7 @@ internal static class Program
                 await BoundedJsonPipe.WriteAsync(pipe, await ExecuteBrokerToggleAsync(profileRequest.Id));
             }
         }
-        catch (HardwareHostTransportException)
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             _ = await RestorePendingForBrokerAsync();
             return 1;
@@ -369,23 +381,26 @@ internal static class Program
     {
         try
         {
-            var preflight = await RunPortableReadOnlyPreflightAsync();
-            if (preflight.CurrentLimitMilliwatts == preflight.DefaultLimitMilliwatts)
-            {
-                return new(true, "The GPU is already at its verified default power limit.", string.Empty, string.Empty);
-            }
-
-            var profile = PortableLivePowerPolicy.ResolveTargetForDevice(
-                preflight.CurrentLimitMilliwatts,
-                preflight);
-            return await ExecuteBrokerToggleAsync(profile.Id);
+            var pipeName = HardwareHostPipeName.Create();
+            await using var server = HardwareHostNamedPipe.CreateServer(pipeName);
+            using var helper = StartElevatedHelper(FindHelperExecutable(), pipeName, Environment.ProcessId,
+                HelperBehavior.RecoveryOnly, new LivePowerProfile("percent-89", 1), inheritElevation: true);
+            await HardwareHostNamedPipe.WaitForConnectionAsync(server);
+            HardwareHostPipePeer.VerifyClientProcess(server, helper.Id);
+            RequireStatus(await ReadStatusAsync(server, helper), "peer-verification");
+            var response = await BoundedJsonPipe.ReadAsync<RecoveryOnlyResponse>(server, TimeSpan.FromMinutes(2));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await helper.WaitForExitAsync(timeout.Token);
+            if (!response.Succeeded || helper.ExitCode != 0 || response.Result is not { IsValid: true } ||
+                response.Result.State is not (GpuOperationState.Restored or GpuOperationState.Unchanged))
+                throw new InvalidOperationException("Protected recovery did not complete: " + response.Error);
+            return new(true, "Protected GPU recovery checked and completed.", string.Empty, string.Empty, response.Result);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            return new(false, "The startup broker could not verify exact restoration.", string.Empty, exception.Message);
+            return new(false, "The broker could not complete protected recovery.", string.Empty, exception.Message);
         }
     }
-
     private static async Task<LiveSessionBrokerResponse> ExecuteBrokerToggleAsync(string profileId)
     {
         var originalOut = Console.Out;
@@ -398,10 +413,11 @@ internal static class Program
             PrintTogglePreflight(preflight, profile, "administrator startup broker");
             Console.WriteLine("Startup UAC session: PASS / mutually verified normal-user launcher");
             Console.WriteLine("Per-action confirmation: NOT REQUIRED / authorized button, hotkey, or enabled idle timer");
-            var exitCode = await RunToggleAsync(preflight, profile, startupBrokerAuthorized: true);
+            GpuOperationResult? result = null;
+            var exitCode = await RunToggleAsync(preflight, profile, startupBrokerAuthorized: true, reportResult: value => result = value);
             var transcript = transcriptWriter.ToString();
             return exitCode == 0
-                ? new(true, "The startup-authorized live toggle completed.", transcript, string.Empty)
+                ? new(true, "The startup-authorized live toggle completed.", transcript, string.Empty, result)
                 : new(false, "The startup-authorized live toggle did not complete.", transcript, $"Exit code {exitCode}.");
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -457,7 +473,7 @@ internal static class Program
     private static async Task<int> RunToggleAsync(
         LiveCanaryDeviceState initialPreflight,
         LivePowerProfile requestedProfile,
-        bool startupBrokerAuthorized = false)
+        bool startupBrokerAuthorized = false, Action<GpuOperationResult>? reportResult = null)
     {
         var percentage = PortableLivePowerPolicy.ParseRequest(requestedProfile.Id).Percentage;
         Console.WriteLine($"Requested live profile: {requestedProfile.Id} / {percentage}% / {FormatLimit(initialPreflight, requestedProfile.TargetLimitMilliwatts)}");
@@ -494,6 +510,7 @@ internal static class Program
             Console.WriteLine("GPU lifecycle: PERCENTAGE LIMIT / EXACT DEFAULT RESTORE");
             Console.WriteLine("Desktop activation triggers: BUTTON, ASSIGNED GLOBAL HOTKEY, OR ENABLED IDLE TIMER");
             Console.WriteLine("Idle activation hardware path: STARTUP-AUTHORIZED BROKER ONLY");
+            reportResult?.Invoke(new(GpuOperationState.Limited, true, true, limited.CurrentLimitMilliwatts, limited.DefaultLimitMilliwatts));
             return 0;
         }
 
@@ -516,6 +533,7 @@ internal static class Program
         Console.WriteLine("GPU lifecycle: PERCENTAGE LIMIT / EXACT DEFAULT RESTORE");
         Console.WriteLine("Desktop activation triggers: BUTTON, ASSIGNED GLOBAL HOTKEY, OR ENABLED IDLE TIMER");
         Console.WriteLine("Idle activation hardware path: STARTUP-AUTHORIZED BROKER ONLY");
+        reportResult?.Invoke(new(GpuOperationState.Restored, true, false, restored.CurrentLimitMilliwatts, restored.DefaultLimitMilliwatts));
         return 0;
     }
 
@@ -946,9 +964,12 @@ internal static class Program
         startInfo.ArgumentList.Add("--parent-pid");
         startInfo.ArgumentList.Add(parentProcessId.ToString(CultureInfo.InvariantCulture));
         startInfo.ArgumentList.Add("--behavior");
-        startInfo.ArgumentList.Add(behavior == HelperBehavior.PersistentToggle
-            ? "persistent-toggle"
-            : "recovery-drill");
+        startInfo.ArgumentList.Add(behavior switch
+        {
+            HelperBehavior.PersistentToggle => "persistent-toggle",
+            HelperBehavior.RecoveryOnly => "recovery-only",
+            _ => "recovery-drill"
+        });
         startInfo.ArgumentList.Add("--profile");
         startInfo.ArgumentList.Add(requestedProfile.Id);
         return Process.Start(startInfo)
@@ -1068,7 +1089,8 @@ internal static class Program
     private enum HelperBehavior
     {
         RecoveryDrill,
-        PersistentToggle
+        PersistentToggle,
+        RecoveryOnly
     }
 
     private sealed record LauncherRequest(
@@ -1088,14 +1110,14 @@ internal static class Program
         bool Succeeded,
         string Message,
         string Transcript,
-        string Error);
+        string Error, GpuOperationResult? Result = null);
 
     private sealed record DesktopSessionMessage(
         string Kind,
         bool Succeeded,
         string Message,
         string Transcript,
-        string Error);
+        string Error, GpuOperationResult? Result = null);
 
     private sealed record HelperRun(
         int ProcessId,

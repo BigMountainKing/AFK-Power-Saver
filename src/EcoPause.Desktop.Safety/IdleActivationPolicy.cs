@@ -33,7 +33,7 @@ public static class IdleActivationPolicy
         bool canApply,
         bool canRestore)
     {
-        if (transitionAttempted)
+        if (transitionAttempted && !timerOwnsActiveLimit)
         {
             return IdleActivationDirective.None;
         }

@@ -25,6 +25,9 @@ public partial class MainWindow : Window, IDisposable
     private static readonly Brush FailedBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
 
     private readonly WindowsActivityObserver _activityObserver;
+    private readonly ProfileCoordinator _profile;
+    private readonly RecoveryRetrySchedule _recoveryRetry = new();
+    private readonly CpuRecoveryCompanion _cpuCompanion = new();
     private readonly DispatcherTimer _screenDimmingTopmostTimer = new()
     {
         Interval = TimeSpan.FromMilliseconds(200)
@@ -64,6 +67,7 @@ public partial class MainWindow : Window, IDisposable
 
     public MainWindow()
     {
+        _profile = new ProfileCoordinator(new DesktopProfileOperations(this));
         InitializeComponent();
         InitializeTipOptions();
         _settings = DesktopUserSettingsStore.Load();
@@ -640,281 +644,93 @@ public partial class MainWindow : Window, IDisposable
         UpdateTrayIconState();
     }
 
-    private async Task RunConfiguredProfileToggleAsync(DesktopActivationSource source)
-    {
-        if (_liveToggleAvailability.Intent == DesktopLiveToggleIntent.Restore || _settings.GpuLimitEnabled)
-        {
-            await RunDesktopLiveToggleAsync(source);
-        }
-        else
-        {
-            await RunLocalProfileToggleAsync(source);
-        }
-
-        if (source != DesktopActivationSource.IdleObserver &&
-            _idleTimerOwnsActiveLimit &&
-            !IsConfiguredProfileActive)
-        {
-            _idleTimerOwnsActiveLimit = false;
-            AppendOutput("Manual control completed the idle-owned restoration.");
-        }
-        UpdateIdleActivationUi();
-    }
-
-    private bool HasEnabledLocalProfile =>
-        _settings.CpuLimitEnabled ||
+    private bool HasEnabledLocalProfile => _settings.CpuLimitEnabled ||
         (_settings.ScreenDimmingEnabled && SelectedDisplayTargetIds.Length > 0);
 
-    private bool IsConfiguredProfileActive =>
-        _liveToggleAvailability.Intent == DesktopLiveToggleIntent.Restore ||
-        _cpuLimitActive ||
-        ProcessorLimitRecoveryJournal.Exists() ||
-        _screenDimmingSession is not null;
+    private bool IsConfiguredProfileActive => _profile.IsActive || _cpuLimitActive ||
+        ProcessorLimitRecoveryJournal.Exists() || _screenDimmingSession is not null;
 
-    private async Task RunLocalProfileToggleAsync(DesktopActivationSource source)
+    private async Task RunConfiguredProfileToggleAsync(DesktopActivationSource source)
     {
-        if (_isRunning || _isProbeRunning || _isInitializing)
-        {
-            return;
-        }
-
+        if (_isRunning || _isProbeRunning || _isInitializing || _isClosingBroker) return;
+        if (source != DesktopActivationSource.IdleObserver) _recoveryRetry.Reset();
+        _profile.AdoptRecovery(false, ProcessorLimitRecoveryJournal.Exists());
         var restoring = IsConfiguredProfileActive;
-        if (!restoring && !HasEnabledLocalProfile)
+        if (!restoring && (_cpuRecoveryBlocked ||
+            (_settings.GpuLimitEnabled && (_liveSession is not { IsReady: true } ||
+            !_liveToggleAvailability.Available || !ValidateSelectedLiveTarget().Accepted))))
         {
-            AppendOutput("Select at least one enabled limit before activation.");
-            SetStatus("No enabled limit selected", FailedBrush);
+            SetStatus("Activation unavailable; restore pending settings first", FailedBrush);
             return;
         }
-
         _isRunning = true;
         UpdateControlAvailability();
         RunProgress.Visibility = Visibility.Visible;
         OutputTextBox.Clear();
         AppendOutput($"Activation trigger: {DesktopActivationRoutingPolicy.Describe(source)}.");
-        AppendOutput("GPU limiting is disabled; the GPU power limit will not be changed.");
         try
         {
-            if (restoring)
-            {
-                HideScreenDimming("Screen dimming removed during profile restoration.");
-                if (_cpuLimitActive || ProcessorLimitRecoveryJournal.Exists())
-                {
-                    await RestoreCpuLimitAsync("CPU exact original AC/DC values restored.");
-                }
-                SetStatus("CPU and display original states restored", ReadyBrush);
-            }
-            else
-            {
-                if (_settings.CpuLimitEnabled)
-                {
-                    await ApplyCpuLimitAsync();
-                }
-                if (_settings.ScreenDimmingEnabled)
-                {
-                    TryActivateScreenDimming();
-                    if (_screenDimmingSession is null)
-                    {
-                        throw new InvalidOperationException("Screen dimming could not be verified.");
-                    }
-                }
-
-                SetStatus(
-                    _settings.CpuLimitEnabled && _settings.ScreenDimmingEnabled
-                        ? "CPU and display limits active"
-                        : _settings.CpuLimitEnabled
-                            ? "CPU limit active"
-                            : "Display dimming active",
-                    StoppedBrush);
-            }
-        }
-#pragma warning disable CA1031 // Local profile failures must restore any partial CPU/display state.
-        catch (Exception exception)
-#pragma warning restore CA1031
-        {
-            AppendOutput($"Local profile stopped safely: {exception.Message}");
-            HideScreenDimming(logMessage: null);
-            if (_cpuLimitActive || ProcessorLimitRecoveryJournal.Exists())
-            {
-                try
-                {
-                    await RestoreCpuLimitAsync("Partial local profile rolled back to exact CPU values.");
-                }
-#pragma warning disable CA1031 // A failed rollback remains visible through the recovery journal.
-                catch (Exception rollbackException)
-#pragma warning restore CA1031
-                {
-                    AppendOutput($"CPU rollback remains pending: {rollbackException.Message}");
-                }
-            }
-            SetStatus("Local profile stopped safely", FailedBrush);
-        }
-        finally
-        {
-            _isRunning = false;
-            RunProgress.Visibility = Visibility.Collapsed;
-            UpdateLiveTargetUi();
-            UpdateControlAvailability();
-        }
-    }
-
-    private async Task RunDesktopLiveToggleAsync(DesktopActivationSource source)
-    {
-        if (_isRunning || _isProbeRunning || _isInitializing)
-        {
-            return;
-        }
-
-        if (_cpuRecoveryBlocked || !_liveToggleAvailability.Available || _liveSession is not { IsReady: true })
-        {
-            var trigger = DesktopActivationRoutingPolicy.Describe(source);
-            AppendOutput($"{trigger} requested a live toggle, but the authorized live session or strict preflight is unavailable. Nothing ran.");
-            SetStatus("Live toggle unavailable — nothing ran", FailedBrush);
-            return;
-        }
-
-        var pausing = _liveToggleAvailability.Intent == DesktopLiveToggleIntent.Pause;
-        var requestedTarget = SelectedLiveTarget;
-        if (pausing && !ValidateSelectedLiveTarget().Accepted)
-        {
-            AppendOutput($"Live target rejected: {ValidateSelectedLiveTarget().Message}");
-            SetStatus("Live target rejected — no helper started", FailedBrush);
-            return;
-        }
-
-        if (!pausing)
-        {
-            HideScreenDimming("Screen dimming removed before GPU restoration.");
-        }
-
-        _isRunning = true;
-        UpdateControlAvailability();
-        UpdateRegisteredHotKeyStatus("Hotkey blocked · live action in progress");
-        RunProgress.Visibility = Visibility.Visible;
-        OutputTextBox.Clear();
-        SetStatus(pausing
-            ? $"Applying {requestedTarget.FormattedLimit} through the startup-authorized broker…"
-            : $"Restoring {FormatGpuLimit(_liveGpu, _liveGpu?.DefaultLimitWatts)} through the startup-authorized broker…", RunningBrush);
-        AppendOutput($"Activation trigger: {DesktopActivationRoutingPolicy.Describe(source)}.");
-        AppendOutput($"Startup-authorized profile request: {requestedTarget.ProfileId} / {requestedTarget.Percentage}% / {requestedTarget.FormattedLimit}.");
-        AppendOutput(_settings.CpuLimitEnabled
-            ? $"Optional CPU ceiling: enabled at {SelectedCpuLimitPercent}%."
-            : "Optional CPU ceiling: disabled.");
-        AppendOutput("No confirmation or additional UAC input is required; protected recovery remains authoritative.");
-
-        Exception? cpuRestoreFailure = null;
-        var cpuWasPending = _cpuLimitActive || ProcessorLimitRecoveryJournal.Exists();
-        try
-        {
-            if (!pausing && cpuWasPending)
-            {
-                try
-                {
-                    await RestoreCpuLimitAsync("CPU exact original AC/DC values restored before GPU restoration.");
-                }
-#pragma warning disable CA1031 // GPU restoration must still be attempted if CPU restoration fails.
-                catch (Exception exception)
-#pragma warning restore CA1031
-                {
-                    cpuRestoreFailure = exception;
-                    AppendOutput($"CPU restoration remains pending: {exception.Message}");
-                }
-            }
-
-            var processResult = await _liveSession.ToggleAsync(requestedTarget);
-            if (!string.IsNullOrWhiteSpace(processResult.Transcript))
-            {
-                AppendOutput(processResult.Transcript.TrimEnd());
-            }
-
-            var evidence = DesktopLiveToggleEvidenceEvaluator.Evaluate(
-                processResult.Succeeded ? 0 : 1,
-                processResult.Transcript,
-                processResult.Error);
-            ApplyDesktopLiveToggleEvidence(evidence);
-
-            if (evidence.Passed && evidence.State == DesktopLiveToggleState.Limited && _settings.CpuLimitEnabled)
-            {
-                try
-                {
-                    await ApplyCpuLimitAsync();
-                    SetStatus(
-                        $"GPU {evidence.Target?.Percentage}% and CPU {SelectedCpuLimitPercent}% limits verified — exact restoration pending",
-                        StoppedBrush);
-                }
-#pragma warning disable CA1031 // A failed optional CPU step must roll the verified GPU limit back.
-                catch (Exception exception)
-#pragma warning restore CA1031
-                {
-                    AppendOutput($"Optional CPU limit failed safely: {exception.Message}");
-                    AppendOutput("Rolling the verified GPU limit back because the combined limit did not complete.");
-                    HideScreenDimming(logMessage: null);
-                    await RollBackGpuAfterCpuFailureAsync(requestedTarget);
-                }
-            }
-            else if (evidence.Passed && evidence.State == DesktopLiveToggleState.Restored)
-            {
-                if (cpuRestoreFailure is null)
-                {
-                    SetStatus(cpuWasPending
-                        ? "GPU and CPU original states restored and verified"
-                        : $"Real GPU restored to {FormatGpuLimit(_liveGpu, _liveGpu?.DefaultLimitWatts)} and verified", ReadyBrush);
-                }
-                else
-                {
-                    SetStatus("GPU restored; CPU exact restoration remains pending", FailedBrush);
-                }
-            }
-        }
-#pragma warning disable CA1031 // A live desktop boundary failure must remain visible and recovery-first.
-        catch (Exception exception)
-#pragma warning restore CA1031
-        {
-            AppendOutput($"Live toggle stopped safely: {exception.Message}");
-            AppendOutput("Use the primary activation button again to prioritize protected recovery.");
-            SetStatus("Stopped safely — live state not verified", FailedBrush);
-        }
-        finally
-        {
-            _isRunning = false;
-            RunProgress.Visibility = Visibility.Collapsed;
-            UpdateControlAvailability();
-            await RefreshGpuAsync();
-            if (source != DesktopActivationSource.IdleObserver &&
-                _idleTimerOwnsActiveLimit &&
-                _liveToggleAvailability.Intent == DesktopLiveToggleIntent.Pause)
+            var result = restoring
+                ? await _profile.RestoreAsync()
+                : await _profile.ApplyAsync(new(_settings.GpuLimitEnabled, _settings.CpuLimitEnabled,
+                    _settings.ScreenDimmingEnabled && SelectedDisplayTargetIds.Length > 0));
+            foreach (var error in result.Errors) AppendOutput(error);
+            SetStatus(result.Succeeded
+                ? result.Active ? "Configured limits applied and verified" : "Original settings restored and verified"
+                : result.Active ? "Restoration pending — use Restore original to retry" : "Activation failed; partial changes restored",
+                result.Succeeded ? result.Active ? StoppedBrush : ReadyBrush : FailedBrush);
+            if (!result.Active)
             {
                 _idleTimerOwnsActiveLimit = false;
-                AppendOutput("Manual control completed the idle-owned restoration.");
+                _recoveryRetry.Reset();
             }
+        }
+        finally
+        {
+            _isRunning = false;
+            RunProgress.Visibility = Visibility.Collapsed;
+            await RefreshGpuAsync();
+            UpdateLiveTargetUi();
+            UpdateControlAvailability();
             UpdateIdleActivationUi();
         }
     }
 
-    private async Task RollBackGpuAfterCpuFailureAsync(DesktopLiveTargetOption requestedTarget)
+    private sealed class DesktopProfileOperations(MainWindow window) : IProfileOperations
     {
-        if (_liveSession is not { IsReady: true })
+        public async Task<GpuOperationResult> ApplyGpuAsync() =>
+            Validate(await (window._liveSession ?? throw new InvalidOperationException("GPU session unavailable."))
+                .ToggleAsync(window.SelectedLiveTarget));
+        public async Task<GpuOperationResult> RestoreGpuAsync()
         {
-            SetStatus("CPU limit failed; protected GPU restoration remains pending", FailedBrush);
-            return;
+            if (window._liveSession is not { IsReady: true })
+            {
+                if (window._liveSession is { } previous)
+                {
+                    try { await previous.DisposeAsync(); }
+                    catch (Exception ex) { window.AppendOutput("Previous GPU session: " + ex.Message); }
+                }
+                await window.InitializeLiveSessionAsync();
+            }
+            return Validate(await (window._liveSession ?? throw new InvalidOperationException("GPU recovery connection was not authorized."))
+                .RestoreAsync());
         }
-
-        var rollback = await _liveSession.ToggleAsync(requestedTarget);
-        if (!string.IsNullOrWhiteSpace(rollback.Transcript))
+        private GpuOperationResult Validate(LiveSessionToggleResult result)
         {
-            AppendOutput(rollback.Transcript.TrimEnd());
+            if (!string.IsNullOrWhiteSpace(result.Transcript)) window.AppendOutput(result.Transcript.TrimEnd());
+            if (!result.Succeeded || result.Result is not { IsValid: true })
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? result.Message : result.Error);
+            return result.Result;
         }
-        var evidence = DesktopLiveToggleEvidenceEvaluator.Evaluate(
-            rollback.Succeeded ? 0 : 1,
-            rollback.Transcript,
-            rollback.Error);
-        ApplyDesktopLiveToggleEvidence(evidence);
-        SetStatus(
-            evidence.Passed && evidence.State == DesktopLiveToggleState.Restored
-                ? "CPU limit was not applied; GPU rolled back exactly"
-                : "Combined limit stopped; protected GPU recovery remains pending",
-            evidence.Passed && evidence.State == DesktopLiveToggleState.Restored ? StoppedBrush : FailedBrush);
+        public Task ApplyCpuAsync() => window.ApplyCpuLimitAsync();
+        public Task RestoreCpuAsync() => window.RestoreCpuLimitAsync("Exact CPU AC/DC values restored.");
+        public void ShowDimming()
+        {
+            window.TryActivateScreenDimming();
+            if (window._screenDimmingSession is null) throw new InvalidOperationException("Display dimming failed.");
+        }
+        public void HideDimming() => window.HideScreenDimming("Display dimming removed.");
     }
-
     private void RegisterActivationHotKey() =>
         ReplaceActivationHotKey(_settings.HotKey, userInitiated: false);
 
@@ -1026,6 +842,7 @@ public partial class MainWindow : Window, IDisposable
         var requestedPercent = SelectedCpuLimitPercent;
         try
         {
+            await _cpuCompanion.EnsureReadyAsync();
             var result = await Task.Run(() =>
                 WindowsProcessorLimitLifecycle.ApplyAndVerify(requestedPercent));
             _cpuLimitActive = result.Changed;
@@ -1315,40 +1132,6 @@ public partial class MainWindow : Window, IDisposable
         });
     }
 
-    private void ApplyDesktopLiveToggleEvidence(DesktopLiveToggleEvidenceResult evidence)
-    {
-        AppendOutput(string.Empty);
-        AppendOutput(evidence.Message);
-
-        switch (evidence.Outcome)
-        {
-            case SimulationEvidenceOutcome.Passed when evidence.State == DesktopLiveToggleState.Limited:
-                SetStatus(
-                    $"Real GPU limit verified at {evidence.Target?.FormattedLimit ?? "the selected setting"} — exact restoration pending",
-                    StoppedBrush);
-                TryActivateScreenDimming();
-                break;
-            case SimulationEvidenceOutcome.Passed when evidence.State == DesktopLiveToggleState.Restored:
-                HideScreenDimming("Screen dimming removed after exact GPU restoration.");
-                SetStatus($"Real GPU restored to {FormatGpuLimit(_liveGpu, _liveGpu?.DefaultLimitWatts)} and verified", ReadyBrush);
-                break;
-            case SimulationEvidenceOutcome.PermissionDeclined:
-                SetStatus("Windows permission declined — no helper approved", StoppedBrush);
-                break;
-            case SimulationEvidenceOutcome.IncompleteEvidence:
-                foreach (var missing in evidence.MissingEvidence)
-                {
-                    AppendOutput($"Missing live evidence: {missing}");
-                }
-
-                SetStatus("Stopped safely — live evidence incomplete", FailedBrush);
-                break;
-            default:
-                SetStatus("Stopped safely — live toggle not verified", FailedBrush);
-                break;
-        }
-    }
-
     private void UpdateRegisteredHotKeyStatus(string message)
     {
         if (_activationHotKey is not null)
@@ -1365,8 +1148,7 @@ public partial class MainWindow : Window, IDisposable
         }
 
         var sessionReady = _liveSession is { IsReady: true };
-        if (!_settings.GpuLimitEnabled &&
-            _liveToggleAvailability.Intent != DesktopLiveToggleIntent.Restore)
+        if (!_settings.GpuLimitEnabled)
         {
             var localReady = HasEnabledLocalProfile && !_cpuRecoveryBlocked;
             HotKeyStatusText.Foreground = localReady ? StoppedBrush : FailedBrush;
@@ -1447,14 +1229,9 @@ public partial class MainWindow : Window, IDisposable
                 : $"{minimumPercentage}–{maximumPercentage}% · {gpu.MinimumLimitWatts:0.##}–{gpu.DefaultLimitWatts:0.##} W default-relative";
             var availability = DesktopLiveTogglePolicy.Evaluate(result);
             UpdateLiveToggleAvailability(availability);
-            if (availability.Intent == DesktopLiveToggleIntent.Pause && ProcessorLimitRecoveryJournal.Exists())
-            {
-                await RestoreCpuLimitAsync(
-                    "GPU is already restored; the remaining CPU recovery journal was restored exactly.");
-            }
             GpuLimitText.Text = FormatGpuLimit(gpu, gpu.CurrentLimitWatts);
             GpuNameText.Text = gpu.LimitKind == GpuPowerLimitKind.DefaultRelativePercentage
-                ? $"{gpu.Model} · AMD ADLX power adjustment"
+                ? $"{gpu.Model} · AMD ADLX · experimental"
                 : $"{gpu.Model} · driver power limit";
             GpuUsageText.Text = gpu.CurrentUsageWatts is null
                 ? "Draw unavailable"
@@ -1502,10 +1279,6 @@ public partial class MainWindow : Window, IDisposable
     private void UpdateLiveToggleAvailability(DesktopLiveToggleAvailability availability)
     {
         _liveToggleAvailability = availability;
-        if (availability.Intent == DesktopLiveToggleIntent.Pause && _screenDimmingSession is not null)
-        {
-            HideScreenDimming("Screen dimming removed because read-only verification reports the GPU at its restored state.");
-        }
         if (availability.Intent == DesktopLiveToggleIntent.Restore && availability.ActiveProfile is not null)
         {
             LivePowerSlider.Value = availability.ActiveProfile.Percentage;
@@ -1529,8 +1302,14 @@ public partial class MainWindow : Window, IDisposable
 
     private void UpdateLiveTargetUi()
     {
-        if (!_settings.GpuLimitEnabled &&
-            _liveToggleAvailability.Intent != DesktopLiveToggleIntent.Restore)
+        if (IsConfiguredProfileActive)
+        {
+            LiveToggleButton.Content = "RESTORE ORIGINAL";
+            LiveToggleStatusText.Text = "Restore each active resource independently. Failed restorations can be retried here.";
+            LiveToggleStatusText.Foreground = StoppedBrush;
+            return;
+        }
+        if (!_settings.GpuLimitEnabled)
         {
             LiveTargetValueText.Text = "GPU OFF";
             LiveToggleButton.Content = IsConfiguredProfileActive ? "RESTORE ORIGINAL" : "ACTIVATE LIMITS";
@@ -1702,31 +1481,15 @@ public partial class MainWindow : Window, IDisposable
 
     private bool CanRunIdleTransition(DesktopLiveToggleIntent requiredIntent)
     {
-        if (_isRunning || _isProbeRunning || _isInitializing || _cpuRecoveryBlocked)
-        {
-            return false;
-        }
-
+        if (_isRunning || _isProbeRunning || _isInitializing || _isClosingBroker) return false;
         if (requiredIntent == DesktopLiveToggleIntent.Restore)
-        {
-            if (_liveToggleAvailability.Intent == DesktopLiveToggleIntent.Restore)
-            {
-                return _liveSession is { IsReady: true } && _liveToggleAvailability.Available;
-            }
-            return IsConfiguredProfileActive;
-        }
-
-        if (_settings.GpuLimitEnabled)
-        {
-            return _liveSession is { IsReady: true } &&
-                _liveToggleAvailability.Available &&
-                _liveToggleAvailability.Intent == DesktopLiveToggleIntent.Pause &&
-                ValidateSelectedLiveTarget().Accepted;
-        }
-
-        return !IsConfiguredProfileActive && HasEnabledLocalProfile;
+            return IsConfiguredProfileActive && _recoveryRetry.IsDue;
+        if (IsConfiguredProfileActive || _cpuRecoveryBlocked) return false;
+        return _settings.GpuLimitEnabled
+            ? _liveSession is { IsReady: true } && _liveToggleAvailability.Available &&
+                _liveToggleAvailability.Intent == DesktopLiveToggleIntent.Pause && ValidateSelectedLiveTarget().Accepted
+            : HasEnabledLocalProfile;
     }
-
     private async Task ExecuteIdleDirectiveAsync(IdleActivationDirective directive)
     {
         var requiredIntent = directive == IdleActivationDirective.ApplyLimits
@@ -1737,7 +1500,7 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        _idleTransitionAttempted = true;
+        if (directive == IdleActivationDirective.ApplyLimits) _idleTransitionAttempted = true;
         AppendOutput(directive == IdleActivationDirective.ApplyLimits
             ? $"Enabled idle timer is applying the configured profile after {SelectedIdleMinutes} minute(s)."
             : "Enabled idle timer is restoring the original state after user activity resumed.");
@@ -1749,6 +1512,15 @@ public partial class MainWindow : Window, IDisposable
             AppendOutput(_idleTimerOwnsActiveLimit
                 ? "Idle activation completed; this timer-owned state will restore when activity resumes."
                 : "Idle activation did not complete; automatic restoration ownership was not claimed.");
+        }
+        else if (IsConfiguredProfileActive)
+        {
+            _recoveryRetry.Failed();
+            if (_recoveryRetry.Exhausted)
+            {
+                ShowMainWindow();
+                SetStatus("Automatic recovery could not finish — use Restore original to retry", FailedBrush);
+            }
         }
         else if (!IsConfiguredProfileActive)
         {
@@ -1782,16 +1554,15 @@ public partial class MainWindow : Window, IDisposable
 
     private void UpdateControlAvailability()
     {
-        var available = !_isRunning && !_isProbeRunning && !_isInitializing;
+        var available = !_isRunning && !_isProbeRunning && !_isInitializing && !_isClosingBroker;
         var liveSessionReady = _liveSession is { IsReady: true };
         var liveTargetAccepted = _liveToggleAvailability.Intent != DesktopLiveToggleIntent.Pause ||
             ValidateSelectedLiveTarget().Accepted;
-        var gpuPathRequired = _settings.GpuLimitEnabled ||
-            _liveToggleAvailability.Intent == DesktopLiveToggleIntent.Restore;
+        var gpuPathRequired = _settings.GpuLimitEnabled;
         var gpuActionReady = liveSessionReady && _liveToggleAvailability.Available && liveTargetAccepted;
         var localActionReady = IsConfiguredProfileActive || HasEnabledLocalProfile;
-        LiveToggleButton.IsEnabled = available && !_cpuRecoveryBlocked &&
-            (gpuPathRequired ? gpuActionReady : localActionReady);
+        LiveToggleButton.IsEnabled = available && (IsConfiguredProfileActive || (!_cpuRecoveryBlocked &&
+            (gpuPathRequired ? gpuActionReady : localActionReady)));
         RefreshGpuButton.IsEnabled = available;
         LivePowerSlider.IsEnabled =
             available && _settings.GpuLimitEnabled && liveSessionReady &&
@@ -1863,6 +1634,12 @@ public partial class MainWindow : Window, IDisposable
         {
             return;
         }
+        if (_isInitializing)
+        {
+            e.Cancel = true;
+            SetStatus("Wait for startup recovery to finish before exiting", StoppedBrush);
+            return;
+        }
 
         if (!_exitRequested)
         {
@@ -1890,7 +1667,7 @@ public partial class MainWindow : Window, IDisposable
         HideScreenDimming("Screen dimming removed before application shutdown.");
 
         var cpuRecoveryPending = _cpuLimitActive || ProcessorLimitRecoveryJournal.Exists();
-        if (!_isRunning && !_isClosingBroker && (_liveSession is not null || cpuRecoveryPending))
+        if (!_isRunning && !_isClosingBroker && (_liveSession is not null || cpuRecoveryPending || _profile.IsActive))
         {
             e.Cancel = true;
             _isClosingBroker = true;
@@ -1899,21 +1676,16 @@ public partial class MainWindow : Window, IDisposable
             var session = _liveSession;
             _liveSession = null;
             Exception? shutdownFailure = null;
-            if (cpuRecoveryPending)
-            {
-                try
-                {
-                    await RestoreCpuLimitAsync("Application shutdown restored the exact original CPU values.");
-                }
-#pragma warning disable CA1031 // GPU broker shutdown must still run after a CPU restoration failure.
-                catch (Exception exception)
-#pragma warning restore CA1031
-                {
-                    shutdownFailure = exception;
-                    AppendOutput($"CPU shutdown restoration was not verified: {exception.Message}");
-                }
-            }
-
+            _profile.AdoptRecovery(false, cpuRecoveryPending);
+            // Keep the session connected while the coordinator restores its GPU ownership.
+            _liveSession = session;
+            var restoration = await _profile.RestoreAsync();
+            if (!restoration.Succeeded)
+                shutdownFailure = new InvalidOperationException(string.Join("; ", restoration.Errors));
+            try { await _cpuCompanion.DisposeAsync(); }
+            catch (Exception ex) { shutdownFailure = ex; AppendOutput(ex.Message); }
+            session = _liveSession;
+            _liveSession = null;
             if (session is not null)
             {
                 try

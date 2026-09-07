@@ -68,7 +68,7 @@
                         BorderBrush="#276749"
                         BorderThickness="1"
                         VerticalAlignment="Top">
-                    <TextBlock Text="1.24.0 RC"
+                    <TextBlock Text="1.25.0 RC"
                                FontSize="11"
                                FontWeight="Bold"
                                Foreground="{StaticResource Accent}" />

@@ -2,6 +2,9 @@ using EcoPause.HardwareHost.Protocol;
 
 namespace EcoPause.LiveCanary.Model;
 
+public sealed record RecoveryOnlyResponse(
+    bool Succeeded, string Error, EcoPause.Hardware.Abstractions.GpuOperationResult? Result);
+
 public enum LiveCanaryMode
 {
     Canary,

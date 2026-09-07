@@ -368,17 +368,8 @@ internal static class Program
         FileSystemAclExtensions.Create(directory, CreateAdministratorOnlySecurity());
     }
 
-    private static void EnsureOnlyKnownArtifacts(string stateDirectory)
-    {
-        var entries = Directory.EnumerateFileSystemEntries(stateDirectory).ToArray();
-        if (entries.Any(entry => !string.Equals(
-                Path.GetFileName(entry),
-                LiveCanaryPolicy.JournalFileName,
-                StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new InvalidOperationException("The protected live-canary directory contains an unknown artifact.");
-        }
-    }
+    private static void EnsureOnlyKnownArtifacts(string stateDirectory) =>
+        RecoveryArtifacts.CleanInterruptedWrites(stateDirectory, LiveCanaryPolicy.JournalFileName);
 
     private static void RejectReparsePoint(string path)
     {

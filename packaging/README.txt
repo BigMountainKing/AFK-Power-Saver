@@ -1,4 +1,4 @@
-AFK Power Saver 1.24.0 Release Candidate
+AFK Power Saver 1.25.0 Release Candidate
 ========================================
 
 AFK Power Saver reduces the enabled GPU and CPU limits and can dim selected displays,
@@ -7,7 +7,7 @@ then restores the exact original settings.
 Install
 -------
 
-1. Run AFK-Power-Saver-1.24.0-Setup.exe.
+1. Run AFK-Power-Saver-1.25.0-Setup.exe.
 2. Open AFK Power Saver from the Start menu.
 3. Approve the one startup UAC prompt for the isolated GPU helper.
 
@@ -31,3 +31,12 @@ Safety
 - Tips are optional and do not unlock features.
 - NVIDIA control uses NVML. Experimental AMD Radeon control uses the ADLX component installed with the AMD display driver and displays limits as a percentage of the factory setting.
 - AMD support is contract-tested but has not yet been verified on physical Radeon hardware.
+
+What's new in 1.25.0
+-------------------
+- Independent CPU/display profiles survive GPU refresh.
+- GPU recovery handles interrupted journal writes and already-restored hardware.
+- Automatic restoration retries; each resource can recover independently.
+- A normal-user CPU companion attempts recovery after desktop termination.
+- CPU restoration preserves a different power plan selected by the user.
+- AMD control requires a verified driver default; physical Radeon qualification remains pending.

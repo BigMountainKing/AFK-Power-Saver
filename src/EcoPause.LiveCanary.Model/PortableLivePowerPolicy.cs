@@ -238,7 +238,8 @@ public static class PortableLivePowerPolicy
 
     public static LivePowerProfile ValidateRecoverySnapshot(
         RecoverySnapshot snapshot,
-        LiveCanaryDeviceState device)
+        LiveCanaryDeviceState device,
+        bool allowClosed = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(device);
@@ -254,7 +255,7 @@ public static class PortableLivePowerPolicy
         }
 
         if (snapshot.Purpose != RecoveryPurpose.LiveRecovery ||
-            snapshot.Stage == RecoveryStage.Restored ||
+            (!allowClosed && snapshot.Stage == RecoveryStage.Restored) ||
             !string.Equals(snapshot.Provider, device.Provider, StringComparison.Ordinal) ||
             !string.Equals(snapshot.Backend, device.Backend, StringComparison.Ordinal) ||
             snapshot.DeviceFingerprint != device.DeviceFingerprint ||
