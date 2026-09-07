@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\EcoPause.CrashRecovery.SimulationModel\EcoPause.CrashRecovery.SimulationModel.csproj" />
+    <ProjectReference Include="..\EcoPause.Core\EcoPause.Core.csproj" />
+    <ProjectReference Include="..\EcoPause.HardwareHost.Protocol\EcoPause.HardwareHost.Protocol.csproj" />
+    <ProjectReference Include="..\EcoPause.HardwareHost.Transport\EcoPause.HardwareHost.Transport.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>EcoPause.ElevatedHost.Simulation</AssemblyName>
+  </PropertyGroup>
+
+</Project>

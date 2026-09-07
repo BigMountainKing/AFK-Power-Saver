@@ -1,0 +1,115 @@
+<Window x:Class="AFKPowerSaver.OverlayCanary.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AFK Power Saver Overlay Test"
+        Width="650"
+        Height="560"
+        MinWidth="600"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBackground}"
+        Foreground="{StaticResource PrimaryText}"
+        SourceInitialized="Window_SourceInitialized"
+        Closing="Window_Closing">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="20" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="AFK Power Saver"
+                       FontSize="28"
+                       FontWeight="SemiBold" />
+            <TextBlock Margin="0,6,0,0"
+                       Text="Screen-dimming safety test 1.17.1 · no CPU or GPU changes"
+                       Foreground="{StaticResource SecondaryText}"
+                       FontSize="14" />
+        </StackPanel>
+
+        <Border Grid.Row="2"
+                Padding="24"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource PanelBorder}"
+                BorderThickness="1"
+                CornerRadius="14">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Black overlay opacity"
+                                   FontSize="15"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Text="The underlying screen remains visible and interactive."
+                                   Foreground="{StaticResource SecondaryText}" />
+                    </StackPanel>
+                    <TextBlock x:Name="OpacityValueText"
+                               Grid.Column="1"
+                               VerticalAlignment="Center"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               Text="70%" />
+                </Grid>
+
+                <Slider x:Name="OpacitySlider"
+                        Grid.Row="1"
+                        Margin="0,20,0,0"
+                        Minimum="10"
+                        Maximum="95"
+                        Value="70"
+                        TickFrequency="5"
+                        IsSnapToTickEnabled="True"
+                        ValueChanged="OpacitySlider_ValueChanged"
+                        AutomationProperties.Name="Overlay opacity percentage" />
+
+                <Border Grid.Row="2"
+                        Margin="0,22,0,0"
+                        Padding="16"
+                        Background="#0D151E"
+                        BorderBrush="{StaticResource PanelBorder}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                    <StackPanel>
+                        <TextBlock Text="Safety exits"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Margin="0,7,0,0"
+                                   Foreground="{StaticResource SecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Text="Press Ctrl+Shift+F12 at any time, or wait 15 seconds. The overlay is click-through and does not take keyboard focus." />
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Grid.Row="3"
+                            Margin="0,20,0,0">
+                    <TextBlock x:Name="MonitorStatusText"
+                               Text="Detecting displays…"
+                               Foreground="{StaticResource SecondaryText}" />
+                    <TextBlock x:Name="RunStatusText"
+                               Margin="0,8,0,0"
+                               Text="Registering emergency hotkey…"
+                               Foreground="{StaticResource SecondaryText}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
+                <Button x:Name="RunOverlayButton"
+                        Grid.Row="4"
+                        Content="Run 15-second overlay test"
+                        IsEnabled="False"
+                        Click="RunOverlayButton_Click" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

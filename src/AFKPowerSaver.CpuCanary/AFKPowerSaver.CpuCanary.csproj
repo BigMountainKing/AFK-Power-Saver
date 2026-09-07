@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AFKPowerSaver.PowerPlan\AFKPowerSaver.PowerPlan.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>AFK Power Saver CPU Preflight</AssemblyName>
+    <RootNamespace>AFKPowerSaver.CpuCanary</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

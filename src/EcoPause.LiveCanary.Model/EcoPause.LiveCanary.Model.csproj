@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\EcoPause.Core\EcoPause.Core.csproj" />
+    <ProjectReference Include="..\EcoPause.Hardware.Abstractions\EcoPause.Hardware.Abstractions.csproj" />
+    <ProjectReference Include="..\EcoPause.HardwareHost.Protocol\EcoPause.HardwareHost.Protocol.csproj" />
+    <ProjectReference Include="..\EcoPause.HardwareHost.Transport\EcoPause.HardwareHost.Transport.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <AssemblyName>AFKPowerSaver.LiveSession.Model</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AFKPowerSaver.OverlayModel\AFKPowerSaver.OverlayModel.csproj" />
+    <ProjectReference Include="..\AFKPowerSaver.Overlay.Windows\AFKPowerSaver.Overlay.Windows.csproj" />
+    <ProjectReference Include="..\AFKPowerSaver.PowerPlan\AFKPowerSaver.PowerPlan.csproj" />
+    <ProjectReference Include="..\EcoPause.Desktop.Safety\EcoPause.Desktop.Safety.csproj" />
+    <ProjectReference Include="..\EcoPause.Probe\EcoPause.Probe.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\EcoPause.LiveRecoveryDrill\EcoPause.LiveRecoveryDrill.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\PayPalQr.png">
+      <LogicalName>Assets/PayPalQr.png</LogicalName>
+    </Resource>
+    <EmbeddedResource Include="Assets\PaymentInfo.txt">
+      <LogicalName>AFKPowerSaver.PaymentInfo.txt</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>AFKPowerSaver</AssemblyName>
+  </PropertyGroup>
+
+</Project>

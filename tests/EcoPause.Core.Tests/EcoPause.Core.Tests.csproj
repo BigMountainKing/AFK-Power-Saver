@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EcoPause.CrashRecovery.SimulationModel\EcoPause.CrashRecovery.SimulationModel.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.Desktop.Safety\EcoPause.Desktop.Safety.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.Core\EcoPause.Core.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.Hardware.Abstractions\EcoPause.Hardware.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.HardwareHost.Protocol\EcoPause.HardwareHost.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.HardwareHost.Transport\EcoPause.HardwareHost.Transport.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.LiveCanary.Model\EcoPause.LiveCanary.Model.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

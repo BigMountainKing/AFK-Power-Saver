@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\EcoPause.ElevatedHost.LiveCanary\EcoPause.ElevatedHost.LiveCanary.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\EcoPause.Hardware.Nvidia\EcoPause.Hardware.Nvidia.csproj" />
+    <ProjectReference Include="..\EcoPause.HardwareHost.Protocol\EcoPause.HardwareHost.Protocol.csproj" />
+    <ProjectReference Include="..\EcoPause.HardwareHost.Transport\EcoPause.HardwareHost.Transport.csproj" />
+    <ProjectReference Include="..\EcoPause.LiveCanary.Model\EcoPause.LiveCanary.Model.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+</Project>

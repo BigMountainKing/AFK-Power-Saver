@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\EcoPause.Core\EcoPause.Core.csproj" />
+    <ProjectReference Include="..\EcoPause.Hardware.Abstractions\EcoPause.Hardware.Abstractions.csproj" />
+    <ProjectReference Include="..\EcoPause.LiveCanary.Model\EcoPause.LiveCanary.Model.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\native\AFKPowerSaver.AmdAdlx.Native\bin\x64\Release\AFKPowerSaver.AmdAdlx.Native.dll')">
+    <None Include="..\..\native\AFKPowerSaver.AmdAdlx.Native\bin\x64\Release\AFKPowerSaver.AmdAdlx.Native.dll"
+          Link="AFKPowerSaver.AmdAdlx.Native.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>AFKPowerSaver.Hardware.Amd</AssemblyName>
+  </PropertyGroup>
+
+</Project>

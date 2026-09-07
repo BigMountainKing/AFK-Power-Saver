@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AFKPowerSaver.OverlayModel\AFKPowerSaver.OverlayModel.csproj" />
+    <ProjectReference Include="..\..\src\AFKPowerSaver.PowerPlan\AFKPowerSaver.PowerPlan.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.Hardware.Abstractions\EcoPause.Hardware.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.Hardware.Amd\EcoPause.Hardware.Amd.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.Hardware.Nvidia\EcoPause.Hardware.Nvidia.csproj" />
+    <ProjectReference Include="..\..\src\EcoPause.Hardware.Nvidia.Control\EcoPause.Hardware.Nvidia.Control.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

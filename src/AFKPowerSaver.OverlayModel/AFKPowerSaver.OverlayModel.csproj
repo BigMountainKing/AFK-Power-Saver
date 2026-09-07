@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>AFKPowerSaver.OverlayModel</AssemblyName>
+    <RootNamespace>AFKPowerSaver.OverlayModel</RootNamespace>
+  </PropertyGroup>
+
+</Project>

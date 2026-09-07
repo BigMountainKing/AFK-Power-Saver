@@ -1,0 +1,22 @@
+**/bin/
+**/obj/
+.vs/
+.dotnet-home/
+.appdata/
+.nuget/
+*.user
+*.suo
+TestResults/
+artifacts/
+work/
+
+# Native bridge build by-products accidentally emitted at the repository root.
+/AmdAdlxBridge.exp
+/AmdAdlxBridge.lib
+/AmdAdlxBridge.obj
+
+# Keep code-signing private keys out of source control.
+*.pfx
+*.p12
+*.pem
+*.key
